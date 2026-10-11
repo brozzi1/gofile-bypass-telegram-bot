@@ -25,6 +25,12 @@ Click the button below to deploy this bot to Render for free:
 3. Enter your **`BOT_TOKEN`** (obtained from [@BotFather](https://t.me/BotFather)).
 4. Click **Apply**. Render will automatically build the service, start the bot, and pass the web health check!
 
+> **If creating a Web Service manually in Render's dashboard:**
+> * **Runtime**: `Python 3`
+> * **Build Command**: `pip install -r requirements.txt`
+> * **Start Command**: `python main.py` *(Replace Render's default placeholder `gunicorn your_application.wsgi`)*
+> * **Environment Variables**: Add `BOT_TOKEN` under the Environment tab.
+
 ---
 
 ## ⚡ Deploy to Pella.app
