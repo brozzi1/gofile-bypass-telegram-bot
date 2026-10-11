@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: gofile-bypass-telegram-bot
+    runtime: python
+    plan: free
+    region: frankfurt
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: WORKER_URL
+        value: https://go-file.ddbypassed.workers.dev
+      - key: WORKER_TOKEN
+        value: RYyZhLtRBdD5idwzBACnwXtT9iYpRibr

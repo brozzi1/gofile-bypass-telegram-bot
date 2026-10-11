@@ -1,56 +1,66 @@
 # GoFile Direct Link Bypasser Telegram Bot
 
-A fast, lightweight, and rate-limit immune Telegram bot that converts GoFile sharing links into direct Cloudflare Worker download URLs.
+A fast, lightweight, and rate-limit immune Telegram bot that converts GoFile sharing links into high-speed direct Cloudflare Worker download URLs.
 
-## Features
-- **Instant Resolution**: Resolves single or multi-file links in ~1.5 seconds.
-- **Concurrent Processing**: If a user sends multiple links, all links resolve in parallel.
-- **Rate-Limit Safe**: Built-in caching eliminates redundant account calls and prevents GoFile HTTP 429 errors.
-- **Clean Telegram UI**: Formatted HTML message with file name, size, direct URL, and an inline **⬇️ Direct Download** button.
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/brozzi1/gofile-bypass-telegram-bot)
+
+## ✨ Features
+- **Instant Resolution**: Pure Python SHA-256 token generation resolves links in ~1.5 seconds.
+- **Concurrent Processing**: If a user sends up to 10 links in a message, all links resolve in parallel.
+- **Multi-User & Queue System**: Multiple users can use the bot simultaneously without blocking; same-user requests are queued via FIFO.
+- **Clean Telegram UI**: Formatted HTML message with blockquoted metadata and compact hyperlinked direct download links.
+- **Rate-Limit Safe**: Built-in caching eliminates redundant account creation and prevents GoFile HTTP 429 errors.
+- **Render Ready**: Built-in lightweight health-check server allows 100% free hosting as a Web Service on Render.
 
 ---
 
-## Deploying on Pella.app
+## 🚀 Deploy to Render (1-Click)
+
+Click the button below to deploy this bot to Render for free:
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/brozzi1/gofile-bypass-telegram-bot)
+
+1. Click **Deploy to Render**.
+2. Sign in or create a free account on [render.com](https://render.com).
+3. Enter your **`BOT_TOKEN`** (obtained from [@BotFather](https://t.me/BotFather)).
+4. Click **Apply**. Render will automatically build the service, start the bot, and pass the web health check!
+
+---
+
+## ⚡ Deploy to Pella.app
 
 1. **Create your Telegram Bot**:
    - Open Telegram and message [@BotFather](https://t.me/BotFather).
-   - Use `/newbot`, name your bot, and copy your **HTTP API Token**.
+   - Send `/newbot`, name your bot, and copy your **HTTP API Token**.
 
-2. **Upload / Connect to Pella.app**:
+2. **Connect to Pella.app**:
    - Create a new project on [Pella.app](https://pella.app).
-   - Connect your GitHub repository containing these files (or upload the files):
-     - `bot.py`
-     - `gofile_resolver.py`
-     - `requirements.txt`
-     - `Procfile`
-     - `Dockerfile`
+   - Connect your GitHub repository: `https://github.com/brozzi1/gofile-bypass-telegram-bot`.
 
 3. **Set Environment Variables on Pella.app**:
-   - In your project settings / environment variables section on Pella.app, add:
-     - `BOT_TOKEN`: `your_bot_token_from_botfather`
-     - `WORKER_URL`: `https://your-worker-subdomain.workers.dev`
-     - *(Optional)* `WORKER_TOKEN`: `your_worker_token` (default: `RYyZhLtRBdD5idwzBACnwXtT9iYpRibr`)
+   - `BOT_TOKEN`: `your_bot_token_from_botfather`
+   - `WORKER_URL`: `https://your-worker-subdomain.workers.dev`
+   - *(Optional)* `WORKER_TOKEN`: `your_worker_token` (default: `RYyZhLtRBdD5idwzBACnwXtT9iYpRibr`)
 
 4. **Start the Bot**:
-   - Build and start the service.
-   - Pella will detect `Procfile` or `Dockerfile`, install dependencies from `requirements.txt`, and start `bot.py`.
-   - Message your bot on Telegram with `/start` and test by pasting a GoFile link!
+   - Pella will detect `Procfile` or `Dockerfile`, install dependencies, and start `bot.py`.
 
 ---
 
-## Running Locally
+## 💻 Running Locally
 
 1. Install dependencies:
    ```bash
    pip install -r requirements.txt
    ```
 
-2. Create a `.env` file (or copy `.env.example`):
-   ```env
-   BOT_TOKEN=your_telegram_bot_token_here
+2. Create a `.env` file from `.env.example`:
+   ```bash
+   cp .env.example .env
    ```
+   Fill in your `BOT_TOKEN`.
 
 3. Run the bot:
    ```bash
-   python bot.py
+   python main.py
    ```

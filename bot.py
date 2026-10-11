@@ -298,6 +298,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             asyncio.create_task(user_worker(user_id))
 
 
+def start_health_check_server(port: int) -> None:
+    """Lightweight background HTTP server for Render/Koyeb web service health checks."""
+    from http.server import HTTPServer, BaseHTTPRequestHandler
+    import threading
+
+    class HealthHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(b"GoFile Bypass Telegram Bot is running!")
+
+        def log_message(self, format, *args):
+            pass  # Silence access logs
+
+    server = HTTPServer(("0.0.0.0", port), HealthHandler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    logger.info(f"Render health-check server listening on port {port}")
+
+
 def main() -> None:
     """Start the bot."""
     if not BOT_TOKEN:
@@ -307,6 +327,13 @@ def main() -> None:
             file=sys.stderr,
         )
         sys.exit(1)
+
+    port = os.getenv("PORT")
+    if port:
+        try:
+            start_health_check_server(int(port))
+        except Exception as e:
+            logger.warning(f"Could not start health-check server on port {port}: {e}")
 
     print("Starting GoFile Bypass Telegram Bot (Multi-user, Queue-enabled)...")
     app = ApplicationBuilder().token(BOT_TOKEN).build()
@@ -321,3 +348,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
