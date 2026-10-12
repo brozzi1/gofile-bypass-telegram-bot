@@ -390,8 +390,9 @@ class HDHubResolver:
             profile.cleanup()
 
     def deep_resolve_hubcloud(self, hubcloud_url: str) -> Dict[str, Any]:
-        """Deep resolve HubCloud destination to extract real file title and direct servers."""
+        """Deep resolve HubCloud destination to extract real file title, size, and direct servers."""
         title = "HubCloud File"
+        size = ""
         servers: List[Dict[str, str]] = []
 
         try:
@@ -399,6 +400,10 @@ class HDHubResolver:
             title_match = re.search(r"<title>(.*?)</title>", r.text, re.IGNORECASE)
             if title_match:
                 title = title_match.group(1).strip()
+
+            size_match = re.search(r'<i id=["\']size["\']>([^<]+)</i>', r.text, re.IGNORECASE)
+            if size_match:
+                size = size_match.group(1).strip()
 
             # Find intermediate gamerxyt.com redirect link if present
             gamerxyt_match = re.search(r'href=["\'](https?://gamerxyt\.com/hubcloud\.php[^"\']+)["\']', r.text)
@@ -425,13 +430,14 @@ class HDHubResolver:
 
         return {
             "title": title,
+            "size": size,
             "servers": servers,
         }
 
     def resolve(self, url: str, deep: bool = True) -> Dict[str, Any]:
         """
         Resolve a single HDHub / GreenMotors / HubCloud link.
-        Returns dictionary containing: original_url, hubcloud_url, title, servers.
+        Returns dictionary containing: original_url, hubcloud_url, title, size, servers.
         """
         norm_url = normalize_url(url)
         t0 = time.perf_counter()
@@ -454,10 +460,12 @@ class HDHubResolver:
 
         # Step 2: Deep resolution if requested
         title = "HubCloud File"
+        size = ""
         servers = []
         if deep and "hubcloud." in hubcloud_url:
             deep_info = self.deep_resolve_hubcloud(hubcloud_url)
             title = deep_info.get("title", title)
+            size = deep_info.get("size", size)
             servers = deep_info.get("servers", [])
 
         elapsed_ms = (time.perf_counter() - t0) * 1000
@@ -466,6 +474,7 @@ class HDHubResolver:
             "original_url": norm_url,
             "hubcloud_url": hubcloud_url,
             "title": title,
+            "size": size,
             "servers": servers,
             "resolve_time_ms": round(elapsed_ms, 1),
         }
@@ -543,14 +552,10 @@ Examples:
             print(f"\n=======================================================")
             print(f" HDHub Content: {res['title']} [{res['resolve_time_ms']:.0f} ms]")
             print(f"=======================================================\n")
-            print(f"🔗 HubCloud URL: {res['hubcloud_url']}\n")
-
-            if res["servers"]:
-                print("⚡ Direct Fast Mirrors:")
-                for s in res["servers"]:
-                    print(f" • {s['name']}:")
-                    print(f"   {s['url']}")
-                print()
+            print(f"📁 Name: {res['title']}")
+            if res.get("size"):
+                print(f"📦 Size: {res['size']}")
+            print(f"🔗 Download Link: {res['hubcloud_url']}\n")
 
         except Exception as e:
             print(f"Error: {e}", file=sys.stderr)

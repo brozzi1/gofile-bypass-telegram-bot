@@ -156,23 +156,20 @@ def format_file_block(idx: int, file_info: dict, folder_name: str = "") -> str:
 
 
 def format_hdhub_block(idx: int, data: dict) -> str:
-    """Format single HDHub / GreenMotors result with direct mirrors."""
-    title = html.escape(data.get("title", "HDHub File"))
-    hubcloud_url = data.get("hubcloud_url", "")
-    servers = data.get("servers", [])
+    """Format single HDHub / GreenMotors result in the exact same format as GoFile."""
+    name = html.escape(data.get("title", "Unknown File"))
+    size_str = html.escape(data.get("size", ""))
+    download_url = data.get("hubcloud_url", "")
 
-    server_lines = []
-    for s in servers:
-        s_name = html.escape(s.get("name", "Direct Download"))
-        s_url = s.get("url", "")
-        server_lines.append(f"• <a href=\"{s_url}\"><b>{s_name}</b></a>")
+    quote_parts = []
+    if size_str:
+        quote_parts.append(f"<b>Size:</b> {size_str}")
 
-    servers_block = "\n".join(server_lines) if server_lines else f"• <a href=\"{hubcloud_url}\"><b>Open HubCloud Drive</b></a>"
+    content = "\n".join(quote_parts) if quote_parts else "<b>Service:</b> HubCloud"
     return (
-        f"🎬 <b>{idx}. {title}</b>\n"
-        f"<blockquote>🔗 <b>HubCloud:</b> <a href=\"{hubcloud_url}\">Drive Link</a></blockquote>\n"
-        f"<b>⚡ Fast Mirrors:</b>\n"
-        f"{servers_block}\n\n"
+        f"📁 <b>{idx}. {name}</b>\n"
+        f"<blockquote>{content}</blockquote>\n"
+        f"<b><a href=\"{download_url}\">⚡ Fast Direct Download</a></b>\n\n"
     )
 
 
