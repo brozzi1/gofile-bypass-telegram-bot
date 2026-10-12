@@ -41,6 +41,7 @@ if hasattr(sys.stderr, "reconfigure"):
 
 try:
     import requests
+    from requests.adapters import HTTPAdapter
 except ImportError:
     print("Error: 'requests' library is required. Install it using: pip install requests", file=sys.stderr)
     sys.exit(1)
@@ -179,6 +180,9 @@ class HDHubResolver:
         self.user_agent = user_agent
         self.enable_chrome_fallback = enable_chrome_fallback
         self.session = requests.Session()
+        adapter = HTTPAdapter(pool_connections=30, pool_maxsize=30)
+        self.session.mount("https://", adapter)
+        self.session.mount("http://", adapter)
         self.session.headers.update({
             "User-Agent": self.user_agent,
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -226,7 +230,7 @@ class HDHubResolver:
             fetch_url = norm_url.replace(host, fast_host)
 
         try:
-            resp = self.session.get(fetch_url, timeout=8, allow_redirects=True)
+            resp = self.session.get(fetch_url, timeout=3.5, allow_redirects=True)
             if resp.status_code == 200:
                 raw_o = self.extract_payload_from_html(resp.text)
                 if raw_o:
@@ -234,7 +238,7 @@ class HDHubResolver:
         except Exception:
             # If the fast mirror failed or timed out, fallback to original URL
             if fetch_url != norm_url:
-                resp = self.session.get(norm_url, timeout=15, allow_redirects=True)
+                resp = self.session.get(norm_url, timeout=6, allow_redirects=True)
                 if resp.status_code == 200:
                     raw_o = self.extract_payload_from_html(resp.text)
                     if raw_o:
@@ -390,41 +394,34 @@ class HDHubResolver:
             profile.cleanup()
 
     def deep_resolve_hubcloud(self, hubcloud_url: str) -> Dict[str, Any]:
-        """Deep resolve HubCloud destination to extract real file title, size, and direct servers."""
+        """Deep resolve HubCloud destination to extract real file title and size directly."""
         title = "HubCloud File"
         size = ""
         servers: List[Dict[str, str]] = []
 
         try:
-            r = self.session.get(hubcloud_url, timeout=8)
+            r = self.session.get(hubcloud_url, timeout=4)
             title_match = re.search(r"<title>(.*?)</title>", r.text, re.IGNORECASE)
             if title_match:
-                title = title_match.group(1).strip()
+                clean_title = title_match.group(1).strip()
+                clean_title = re.sub(r"\s*[-–|]\s*HubCloud.*$", "", clean_title, flags=re.IGNORECASE).strip()
+                if clean_title:
+                    title = clean_title
 
             size_match = re.search(r'<i id=["\']size["\']>([^<]+)</i>', r.text, re.IGNORECASE)
             if size_match:
                 size = size_match.group(1).strip()
 
-            # Find intermediate gamerxyt.com redirect link if present
-            gamerxyt_match = re.search(r'href=["\'](https?://gamerxyt\.com/hubcloud\.php[^"\']+)["\']', r.text)
-            if gamerxyt_match:
-                gx_url = gamerxyt_match.group(1)
-                gx_resp = self.session.get(gx_url, headers={"Referer": hubcloud_url}, timeout=8)
-                page_content = gx_resp.text
-            else:
-                page_content = r.text
-
-            # Parse download buttons
-            for m in re.finditer(r'<a\s+[^>]*href=["\']([^"\']+)["\'][^>]*>(.*?)</a>', page_content, re.IGNORECASE | re.DOTALL):
+            # Parse any direct download mirrors already present on hubcloud page
+            for m in re.finditer(r'<a\s+[^>]*href=["\']([^"\']+)["\'][^>]*>(.*?)</a>', r.text, re.IGNORECASE | re.DOTALL):
                 href = m.group(1)
                 text = re.sub(r'<[^>]+>', '', m.group(2)).strip()
                 if any(k in href for k in ["storage.googleapis.com", "pixeldrain", "tg/go", "gofile", "fast"]):
-                    # Clean up label
                     label = text if text and len(text) < 40 else "Direct Download"
                     if not any(s["url"] == href for s in servers):
                         servers.append({"name": label, "url": href})
 
-        except Exception as e:
+        except Exception:
             # Deep resolve is best-effort
             pass
 
