@@ -42,7 +42,7 @@ except ImportError:
 
 # Import optimized resolvers
 from gofile_resolver import GoFileResolver, DEFAULT_WORKER_TOKEN
-from hdhub_resolver import HDHubResolver, extract_links_from_post
+from hdhub_resolver import HDHubResolver, extract_links_from_post, extract_post_items
 
 # Configure logging
 logging.basicConfig(
@@ -118,19 +118,29 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await update.message.reply_text(help_text, parse_mode=ParseMode.HTML)
 
 
-def sync_resolve_batch(items: List[Tuple[str, str]]) -> List[Tuple[str, str, Optional[dict], Optional[Exception]]]:
+def sync_resolve_batch(items: List[Any]) -> List[Tuple[str, str, Optional[dict], Optional[Exception]]]:
     """Resolve a mixed batch of links concurrently."""
-    def _worker(item: Tuple[str, str]):
-        ltype, url = item
-        try:
-            if ltype == "hdhub":
-                res = hdhub_resolver.resolve(url, deep=True)
-                return ltype, url, res, None
-            else:
-                res = resolver.resolve(url)
-                return ltype, url, res, None
-        except Exception as e:
-            return ltype, url, None, e
+    def _worker(item: Any):
+        if isinstance(item, tuple) and len(item) == 4 and item[0] == "hdhub_item":
+            _, url, title, size = item
+            try:
+                res = hdhub_resolver.resolve(url, deep=True, title=title, size=size)
+                return "hdhub", url, res, None
+            except Exception as e:
+                return "hdhub", url, None, e
+        elif isinstance(item, tuple):
+            ltype, url = item[0], item[1]
+            try:
+                if ltype == "hdhub":
+                    res = hdhub_resolver.resolve(url, deep=True)
+                    return ltype, url, res, None
+                else:
+                    res = resolver.resolve(url)
+                    return ltype, url, res, None
+            except Exception as e:
+                return ltype, url, None, e
+        else:
+            return "unknown", str(item), None, ValueError("Unknown item format")
 
     workers = min(len(items), 5) if items else 1
     with ThreadPoolExecutor(max_workers=workers) as executor:
@@ -284,7 +294,7 @@ async def process_batch(update: Update, items: List[Tuple[str, str]], was_trunca
 
 
 async def process_post(update: Update, post_url: str) -> None:
-    """Scrape a 4kHDHub/HDHub4u post, extract greenmotors links, and resolve in batches of 5."""
+    """Scrape a 4kHDHub/HDHub4u post, extract items with title and size, and resolve in batches of 5."""
     status_msg = await update.message.reply_text(
         "🔍 <b>Scraping post for greenmotors links...</b>",
         parse_mode=ParseMode.HTML,
@@ -292,7 +302,7 @@ async def process_post(update: Update, post_url: str) -> None:
     loop = asyncio.get_running_loop()
 
     try:
-        links = await loop.run_in_executor(None, extract_links_from_post, post_url)
+        items = await loop.run_in_executor(None, extract_post_items, post_url)
     except Exception as e:
         logger.exception("Failed to scrape post")
         try:
@@ -304,11 +314,9 @@ async def process_post(update: Update, post_url: str) -> None:
             pass
         return
 
-    # Deduplicate links while preserving order
-    unique_links = list(dict.fromkeys(links))
-    total_found = len(unique_links)
+    total_found = len(items)
 
-    if not unique_links:
+    if not items:
         try:
             await status_msg.edit_text(
                 "⚠️ <b>No greenmotors download links found in this post.</b>",
@@ -319,8 +327,8 @@ async def process_post(update: Update, post_url: str) -> None:
         return
 
     # Enforce safe upper cap to avoid Telegram flood limits
-    links_to_process = unique_links[:MAX_POST_LINKS]
-    total_processing = len(links_to_process)
+    items_to_process = items[:MAX_POST_LINKS]
+    total_processing = len(items_to_process)
 
     try:
         await status_msg.edit_text(
@@ -331,15 +339,15 @@ async def process_post(update: Update, post_url: str) -> None:
         pass
 
     # Split into chunks of POST_BATCH_SIZE (5)
-    chunks = [links_to_process[i:i + POST_BATCH_SIZE] for i in range(0, total_processing, POST_BATCH_SIZE)]
+    chunks = [items_to_process[i:i + POST_BATCH_SIZE] for i in range(0, total_processing, POST_BATCH_SIZE)]
     global_idx = 1
 
     for chunk_idx, chunk in enumerate(chunks, 1):
         t0 = time.perf_counter()
-        items = [("hdhub", u) for u in chunk]
+        batch_items = [("hdhub_item", it["url"], it.get("title", ""), it.get("size", "")) for it in chunk]
 
         try:
-            batch_results = await loop.run_in_executor(None, sync_resolve_batch, items)
+            batch_results = await loop.run_in_executor(None, sync_resolve_batch, batch_items)
         except Exception as e:
             logger.exception("Batch resolution failed")
             continue

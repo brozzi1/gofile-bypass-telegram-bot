@@ -431,10 +431,17 @@ class HDHubResolver:
             "servers": servers,
         }
 
-    def resolve(self, url: str, deep: bool = True) -> Dict[str, Any]:
+    def resolve(
+        self,
+        url: str,
+        deep: bool = True,
+        title: Optional[str] = None,
+        size: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
         Resolve a single HDHub / GreenMotors / HubCloud link.
-        Returns dictionary containing: original_url, hubcloud_url, title, size, servers.
+        If title and size are already provided (e.g. from 4kHDHub post cards),
+        skips remote HubCloud scraping for maximum speed (< 0.3s).
         """
         norm_url = normalize_url(url)
         t0 = time.perf_counter()
@@ -459,14 +466,17 @@ class HDHubResolver:
         if "hubdrive." in hubcloud_url.lower():
             raise ValueError("HubDrive link skipped (HubDrive duplicates HubCloud).")
 
-        # Step 2: Deep resolution if requested
-        title = "HubCloud File"
-        size = ""
-        servers = []
-        if deep and "hubcloud." in hubcloud_url:
+        final_title = title or "HubCloud File"
+        final_size = size or ""
+        servers: List[Dict[str, str]] = []
+
+        # Step 2: Deep resolution only if title or size is missing and deep=True
+        if deep and "hubcloud." in hubcloud_url and (not title or not size):
             deep_info = self.deep_resolve_hubcloud(hubcloud_url)
-            title = deep_info.get("title", title)
-            size = deep_info.get("size", size)
+            if not title and deep_info.get("title"):
+                final_title = deep_info["title"]
+            if not size and deep_info.get("size"):
+                final_size = deep_info["size"]
             servers = deep_info.get("servers", [])
 
         elapsed_ms = (time.perf_counter() - t0) * 1000
@@ -474,8 +484,8 @@ class HDHubResolver:
         return {
             "original_url": norm_url,
             "hubcloud_url": hubcloud_url,
-            "title": title,
-            "size": size,
+            "title": final_title,
+            "size": final_size,
             "servers": servers,
             "resolve_time_ms": round(elapsed_ms, 1),
         }
@@ -513,8 +523,15 @@ class HDHubResolver:
         return links, results
 
 
-def extract_links_from_post(post_url: str, session: Optional[requests.Session] = None, exclude_hubdrive: bool = True) -> List[str]:
-    """Scrape and deduplicate greenmotors links from a 4kHDHub / HDHub4u post page, excluding HubDrive links."""
+def extract_post_items(
+    post_url: str,
+    session: Optional[requests.Session] = None,
+    exclude_hubdrive: bool = True
+) -> List[Dict[str, str]]:
+    """
+    Scrape and deduplicate items (url, title, size) from a 4kHDHub / HDHub4u post page.
+    Extracts exact file-title and size badges directly from download-item cards.
+    """
     s = session or requests.Session()
     headers = {
         "User-Agent": DEFAULT_USER_AGENT,
@@ -522,36 +539,76 @@ def extract_links_from_post(post_url: str, session: Optional[requests.Session] =
     }
     resp = s.get(post_url, headers=headers, timeout=12)
     resp.raise_for_status()
+    html = resp.text
 
-    # Search for all <a> tags with greenmotors in href
-    pattern = re.compile(
-        r'<a\s+([^>]*href=["\']([^"\']*greenmotors\.[^"\']*)["\'][^>]*)>(.*?)</a>',
-        re.IGNORECASE | re.DOTALL,
-    )
-    unique_links: List[str] = []
+    items: List[Dict[str, str]] = []
     seen = set()
 
-    for m in pattern.finditer(resp.text):
-        attrs = m.group(1).lower()
-        href = m.group(2).strip()
-        text = re.sub(r'<[^>]+>', '', m.group(3)).strip().lower()
+    # Strategy 1: Parse download-item cards which contain exact file-title and size badges
+    sections = re.split(r'<div\s+[^>]*class=["\'][^"\']*download-item[^"\']*["\'][^>]*>', html, flags=re.IGNORECASE)
+    if len(sections) > 1:
+        for sec in sections[1:]:
+            title_m = re.search(r'<div\s+[^>]*class=["\'][^"\']*file-title[^"\']*["\'][^>]*>(.*?)</div>', sec, re.IGNORECASE | re.DOTALL)
+            title = re.sub(r'<[^>]+>', '', title_m.group(1)).strip() if title_m else ""
 
-        if exclude_hubdrive and ("hubdrive" in text or "hubdrive" in attrs):
-            continue
+            size_m = re.search(r'<span\s+[^>]*class=["\'][^"\']*badge[^"\']*["\'][^>]*>([^<]*\b\d+(?:\.\d+)?\s*(?:GB|MB|KB)\b[^<]*)</span>', sec, re.IGNORECASE)
+            size = size_m.group(1).strip() if size_m else ""
 
-        if href and href not in seen:
-            seen.add(href)
-            unique_links.append(href)
+            hubcloud_url = None
+            for m in re.finditer(r'<a\s+([^>]*href=["\']([^"\']*greenmotors\.[^"\']*)["\'][^>]*)>(.*?)</a>', sec, re.IGNORECASE | re.DOTALL):
+                attrs = m.group(1).lower()
+                href = m.group(2).strip()
+                text = re.sub(r'<[^>]+>', '', m.group(3)).strip().lower()
 
-    # Fallback if no <a> tags matched but greenmotors hrefs exist
-    if not unique_links:
-        for m in re.findall(r'href=["\']([^"\']*greenmotors\.[^"\']*)["\']', resp.text, re.IGNORECASE):
-            m = m.strip()
-            if m and m not in seen:
-                seen.add(m)
-                unique_links.append(m)
+                if exclude_hubdrive and ("hubdrive" in text or "hubdrive" in attrs):
+                    continue
+                if "hubcloud" in text:
+                    hubcloud_url = href
+                    break
+                elif not hubcloud_url:
+                    hubcloud_url = href
 
-    return unique_links
+            if hubcloud_url and hubcloud_url not in seen:
+                seen.add(hubcloud_url)
+                items.append({
+                    "url": hubcloud_url,
+                    "title": title,
+                    "size": size,
+                })
+
+    # Strategy 2: Fallback to all <a> tags with greenmotors if no download-item sections found
+    if not items:
+        pattern = re.compile(
+            r'<a\s+([^>]*href=["\']([^"\']*greenmotors\.[^"\']*)["\'][^>]*)>(.*?)</a>',
+            re.IGNORECASE | re.DOTALL,
+        )
+        for m in pattern.finditer(html):
+            attrs = m.group(1).lower()
+            href = m.group(2).strip()
+            text = re.sub(r'<[^>]+>', '', m.group(3)).strip().lower()
+
+            if exclude_hubdrive and ("hubdrive" in text or "hubdrive" in attrs):
+                continue
+
+            if href and href not in seen:
+                seen.add(href)
+                items.append({
+                    "url": href,
+                    "title": "",
+                    "size": "",
+                })
+
+    return items
+
+
+def extract_links_from_post(
+    post_url: str,
+    session: Optional[requests.Session] = None,
+    exclude_hubdrive: bool = True
+) -> List[str]:
+    """Scrape and deduplicate greenmotors links from a 4kHDHub / HDHub4u post page (backwards-compatible)."""
+    items = extract_post_items(post_url, session=session, exclude_hubdrive=exclude_hubdrive)
+    return [it["url"] for it in items]
 
 
 def resolve_hdhub(url: str, deep: bool = True) -> Dict[str, Any]:
