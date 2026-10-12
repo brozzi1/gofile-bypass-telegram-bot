@@ -458,6 +458,10 @@ class HDHubResolver:
                 else:
                     raise http_err
 
+        # Skip HubDrive links to save resources and avoid redundant resolution
+        if "hubdrive." in hubcloud_url.lower():
+            raise ValueError("HubDrive link skipped (HubDrive duplicates HubCloud).")
+
         # Step 2: Deep resolution if requested
         title = "HubCloud File"
         size = ""
@@ -512,8 +516,8 @@ class HDHubResolver:
         return links, results
 
 
-def extract_links_from_post(post_url: str, session: Optional[requests.Session] = None) -> List[str]:
-    """Scrape and deduplicate all greenmotors sharing links from a 4kHDHub / HDHub4u post page."""
+def extract_links_from_post(post_url: str, session: Optional[requests.Session] = None, exclude_hubdrive: bool = True) -> List[str]:
+    """Scrape and deduplicate greenmotors links from a 4kHDHub / HDHub4u post page, excluding HubDrive links."""
     s = session or requests.Session()
     headers = {
         "User-Agent": DEFAULT_USER_AGENT,
@@ -522,15 +526,34 @@ def extract_links_from_post(post_url: str, session: Optional[requests.Session] =
     resp = s.get(post_url, headers=headers, timeout=12)
     resp.raise_for_status()
 
-    # Search for all hrefs containing greenmotors.
-    matches = re.findall(r'href=["\']([^"\']*greenmotors\.[^"\']*)["\']', resp.text, re.IGNORECASE)
+    # Search for all <a> tags with greenmotors in href
+    pattern = re.compile(
+        r'<a\s+([^>]*href=["\']([^"\']*greenmotors\.[^"\']*)["\'][^>]*)>(.*?)</a>',
+        re.IGNORECASE | re.DOTALL,
+    )
     unique_links: List[str] = []
     seen = set()
-    for m in matches:
-        m = m.strip()
-        if m and m not in seen:
-            seen.add(m)
-            unique_links.append(m)
+
+    for m in pattern.finditer(resp.text):
+        attrs = m.group(1).lower()
+        href = m.group(2).strip()
+        text = re.sub(r'<[^>]+>', '', m.group(3)).strip().lower()
+
+        if exclude_hubdrive and ("hubdrive" in text or "hubdrive" in attrs):
+            continue
+
+        if href and href not in seen:
+            seen.add(href)
+            unique_links.append(href)
+
+    # Fallback if no <a> tags matched but greenmotors hrefs exist
+    if not unique_links:
+        for m in re.findall(r'href=["\']([^"\']*greenmotors\.[^"\']*)["\']', resp.text, re.IGNORECASE):
+            m = m.strip()
+            if m and m not in seen:
+                seen.add(m)
+                unique_links.append(m)
+
     return unique_links
 
 
