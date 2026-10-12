@@ -1,16 +1,18 @@
-# GoFile Direct Link Bypasser Telegram Bot
+# GoFile & HDHub Direct Link Bypasser Telegram Bot
 
-A fast, lightweight, and rate-limit immune Telegram bot that converts GoFile sharing links into high-speed direct Cloudflare Worker download URLs.
+A fast, lightweight, and rate-limit immune Telegram bot that converts **GoFile** and **HDHub / GreenMotors / HubCloud** sharing links into high-speed direct download URLs.
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/brozzi1/gofile-bypass-telegram-bot)
 
 ## ✨ Features
-- **Instant Resolution**: Pure Python SHA-256 token generation resolves links in ~1.5 seconds.
+- **Multi-Service Bypass**:
+  - **GoFile.io**: Pure Python SHA-256 token generation + dynamic session authorization via Cloudflare Worker proxy.
+  - **HDHub / GreenMotors / HubCloud**: Ultra-fast pure Python HTTP decoding (< 1s, < 15MB RAM) with automatic deep scraping of fast server mirrors (Google Cloud, PixelDrain, Telegram).
 - **Concurrent Processing**: If a user sends up to 10 links in a message, all links resolve in parallel.
 - **Multi-User & Queue System**: Multiple users can use the bot simultaneously without blocking; same-user requests are queued via FIFO.
 - **Clean Telegram UI**: Formatted HTML message with blockquoted metadata and compact hyperlinked direct download links.
-- **Rate-Limit Safe**: Built-in caching eliminates redundant account creation and prevents GoFile HTTP 429 errors.
-- **Render Ready**: Built-in lightweight health-check server allows 100% free hosting as a Web Service on Render.
+- **Render & Cloud Ready**: Zero heavy browser overhead (< 15MB RAM footprint), works on Render's 512MB free tier without crashing.
+- **Standalone CLI Tools**: Both `gofile_resolver.py` and `hdhub_resolver.py` can also be run directly from terminal or imported into Python projects.
 
 ---
 
