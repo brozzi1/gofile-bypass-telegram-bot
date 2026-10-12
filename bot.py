@@ -42,7 +42,7 @@ except ImportError:
 
 # Import optimized resolvers
 from gofile_resolver import GoFileResolver, DEFAULT_WORKER_TOKEN
-from hdhub_resolver import HDHubResolver
+from hdhub_resolver import HDHubResolver, extract_links_from_post
 
 # Configure logging
 logging.basicConfig(
@@ -55,6 +55,8 @@ BOT_TOKEN = os.getenv("BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 WORKER_URL = os.getenv("WORKER_URL", "https://go-file.ddbypassed.workers.dev")
 WORKER_TOKEN = os.getenv("WORKER_TOKEN") or DEFAULT_WORKER_TOKEN
 MAX_LINKS_PER_BATCH = 10
+MAX_POST_LINKS = int(os.getenv("MAX_POST_LINKS", "25"))
+POST_BATCH_SIZE = 5
 MAX_TG_MSG_LENGTH = 3900  # Safe threshold below Telegram's 4096 limit
 
 # Global resolver instances
@@ -67,6 +69,10 @@ GOFILE_REGEX = re.compile(
 )
 HDHUB_REGEX = re.compile(
     r"https?://(?:www\.)?(?:greenmotors\.[a-z]+|hubcloud\.[a-z]+)[^\s]*",
+    re.IGNORECASE,
+)
+POST_REGEX = re.compile(
+    r"https?://(?:www\.)?(?:4khdhub|hdhub4u)\.[a-z0-9_-]+/[a-zA-Z0-9_-]+/?",
     re.IGNORECASE,
 )
 
@@ -82,15 +88,16 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     welcome_text = (
         f"👋 <b>Hello {html.escape(user.first_name)}!</b>\n\n"
         "⚡ <b>Welcome to GoFile & HDHub Direct Link Bypasser Bot.</b>\n\n"
-        "Send me any <b>GoFile</b> or <b>HDHub / GreenMotors / HubCloud</b> links, and I will resolve them into fast direct download links.\n\n"
-        "<b>Supported Links:</b>\n"
-        "• <b>GoFile.io</b> — Instant Cloudflare Worker bypassed direct links.\n"
-        "• <b>HDHub / GreenMotors</b> — Instant HubCloud bypass + Direct Server Mirrors (Google Cloud, PixelDrain, Telegram).\n\n"
+        "Send me any of the following:\n"
+        "• <b>GoFile link(s)</b> — Instant Cloudflare Worker bypassed direct links.\n"
+        "• <b>HDHub / GreenMotors link(s)</b> — Instant HubCloud bypass.\n"
+        "• <b>4kHDHub / HDHub4u Post URL</b> — Automatically scrapes all greenmotors links from the post and sends results in clean batches of 5!\n\n"
         "<b>Features:</b>\n"
-        "• Up to <b>10 links</b> per message.\n"
-        "• Single clean formatted response message.\n"
+        "• Up to <b>10 direct links</b> per message.\n"
+        "• Auto-scraping and deduplication for series & movie posts.\n"
+        "• Formatted in batches of 5 with no duplicate messages.\n"
         "• Smart per-user queue system.\n\n"
-        "<i>Send me a link or list of links to get started!</i>"
+        "<i>Send me a link or post URL to get started!</i>"
     )
     await update.message.reply_text(welcome_text, parse_mode=ParseMode.HTML)
 
@@ -99,13 +106,14 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     """Send help instructions."""
     help_text = (
         "📖 <b>How to Use:</b>\n\n"
-        "1. Paste one or more links in this chat (max 10 per message).\n"
-        "2. The bot resolves both GoFile and HDHub / GreenMotors links in parallel.\n\n"
+        "1. <b>Direct Links:</b> Paste GoFile or GreenMotors links (up to 10 at once).\n"
+        "2. <b>Post URLs:</b> Paste a 4kHDHub post URL (e.g. <code>https://4khdhub.one/black-clover-series-122/</code>). "
+        "The bot scrapes all greenmotors links and delivers results in clean batches of 5.\n\n"
         "<b>GoFile Password Protected:</b>\n"
         "Format: <code>https://gofile.io/d/FILE_ID::password</code>\n\n"
         "<b>Queue System:</b>\n"
-        "If you send more links while your current batch is resolving, "
-        "they will be queued and automatically processed next."
+        "If you send more links while your previous request is resolving, "
+        "they are queued and automatically processed next."
     )
     await update.message.reply_text(help_text, parse_mode=ParseMode.HTML)
 
@@ -275,6 +283,114 @@ async def process_batch(update: Update, items: List[Tuple[str, str]], was_trunca
             pass
 
 
+async def process_post(update: Update, post_url: str) -> None:
+    """Scrape a 4kHDHub/HDHub4u post, extract greenmotors links, and resolve in batches of 5."""
+    status_msg = await update.message.reply_text(
+        "🔍 <b>Scraping post for greenmotors links...</b>",
+        parse_mode=ParseMode.HTML,
+    )
+    loop = asyncio.get_running_loop()
+
+    try:
+        links = await loop.run_in_executor(None, extract_links_from_post, post_url)
+    except Exception as e:
+        logger.exception("Failed to scrape post")
+        try:
+            await status_msg.edit_text(
+                f"❌ <b>Failed to load post page:</b> {html.escape(str(e))}",
+                parse_mode=ParseMode.HTML,
+            )
+        except Exception:
+            pass
+        return
+
+    # Deduplicate links while preserving order
+    unique_links = list(dict.fromkeys(links))
+    total_found = len(unique_links)
+
+    if not unique_links:
+        try:
+            await status_msg.edit_text(
+                "⚠️ <b>No greenmotors download links found in this post.</b>",
+                parse_mode=ParseMode.HTML,
+            )
+        except Exception:
+            pass
+        return
+
+    # Enforce safe upper cap to avoid Telegram flood limits
+    links_to_process = unique_links[:MAX_POST_LINKS]
+    total_processing = len(links_to_process)
+
+    try:
+        await status_msg.edit_text(
+            f"⚡ <b>Found {total_found} link(s). Resolving in batches of {POST_BATCH_SIZE}...</b>",
+            parse_mode=ParseMode.HTML,
+        )
+    except Exception:
+        pass
+
+    # Split into chunks of POST_BATCH_SIZE (5)
+    chunks = [links_to_process[i:i + POST_BATCH_SIZE] for i in range(0, total_processing, POST_BATCH_SIZE)]
+    global_idx = 1
+
+    for chunk_idx, chunk in enumerate(chunks, 1):
+        t0 = time.perf_counter()
+        items = [("hdhub", u) for u in chunk]
+
+        try:
+            batch_results = await loop.run_in_executor(None, sync_resolve_batch, items)
+        except Exception as e:
+            logger.exception("Batch resolution failed")
+            continue
+
+        t1 = time.perf_counter()
+        elapsed_sec = t1 - t0
+
+        start_num = (chunk_idx - 1) * POST_BATCH_SIZE + 1
+        end_num = min(chunk_idx * POST_BATCH_SIZE, total_processing)
+
+        if len(chunks) == 1:
+            header = f"⚡ <b>Results ({total_processing} links)</b> (<code>{elapsed_sec:.2f}s</code>)\n\n"
+        else:
+            header = f"⚡ <b>Results ({start_num}–{end_num} of {total_processing})</b> (<code>{elapsed_sec:.2f}s</code>)\n\n"
+
+        items_text = []
+        for _, _, data, err in batch_results:
+            if err:
+                err_msg = html.escape(str(err))
+                item = (
+                    f"❌ <b>Failed:</b>\n"
+                    f"<blockquote><b>Error:</b> {err_msg}</blockquote>\n"
+                )
+                items_text.append(item)
+            elif data:
+                items_text.append(format_hdhub_block(global_idx, data))
+                global_idx += 1
+
+        msg_content = header + "".join(items_text)
+
+        if len(msg_content) > MAX_TG_MSG_LENGTH:
+            msg_content = msg_content[:MAX_TG_MSG_LENGTH]
+
+        try:
+            if chunk_idx == 1:
+                await status_msg.edit_text(
+                    msg_content,
+                    parse_mode=ParseMode.HTML,
+                    disable_web_page_preview=True,
+                )
+            else:
+                await update.message.reply_text(
+                    msg_content,
+                    parse_mode=ParseMode.HTML,
+                    disable_web_page_preview=True,
+                )
+                await asyncio.sleep(0.5)
+        except Exception as e:
+            logger.error(f"Error sending batch {chunk_idx}: {e}")
+
+
 async def user_worker(user_id: int) -> None:
     """Worker task that processes all queued requests for a specific user sequentially."""
     try:
@@ -285,10 +401,15 @@ async def user_worker(user_id: int) -> None:
                     user_active_tasks.discard(user_id)
                     user_queues.pop(user_id, None)
                     break
-                update, items, was_truncated = q.get_nowait()
+                task_type, payload = q.get_nowait()
 
             try:
-                await process_batch(update, items, was_truncated)
+                if task_type == "post":
+                    update, post_url = payload
+                    await process_post(update, post_url)
+                else:
+                    update, items, was_truncated = payload
+                    await process_batch(update, items, was_truncated)
             except Exception as e:
                 logger.error(f"Error processing user {user_id} item: {e}")
     finally:
@@ -303,35 +424,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     text = update.message.text or update.message.caption or ""
+
+    # 1. Check for 4kHDHub / HDHub4u post URLs
+    post_matches = POST_REGEX.findall(text)
+
+    # 2. Check for GoFile links
     gofile_matches = GOFILE_REGEX.findall(text)
-    hdhub_matches = HDHUB_REGEX.findall(text)
 
-    all_items: List[Tuple[str, str]] = []
-    seen = set()
+    # 3. Check for direct greenmotors / hubcloud links (excluding post URLs)
+    hdhub_matches = [
+        u for u in HDHUB_REGEX.findall(text)
+        if not POST_REGEX.search(u)
+    ]
 
-    for code in gofile_matches:
-        u = f"https://gofile.io/d/{code}"
-        if u not in seen:
-            seen.add(u)
-            all_items.append(("gofile", u))
-
-    for u in hdhub_matches:
-        u = u.strip()
-        if u not in seen:
-            seen.add(u)
-            all_items.append(("hdhub", u))
-
-    if not all_items:
+    if not post_matches and not gofile_matches and not hdhub_matches:
         return
 
     user = update.effective_user
     user_id = user.id
 
-    was_truncated = False
-    if len(all_items) > MAX_LINKS_PER_BATCH:
-        all_items = all_items[:MAX_LINKS_PER_BATCH]
-        was_truncated = True
-
+    # Queue tasks for this user
     async with queue_lock:
         if user_id not in user_queues:
             user_queues[user_id] = asyncio.Queue()
@@ -339,21 +451,43 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         q = user_queues[user_id]
         is_active = user_id in user_active_tasks
 
+        # Deduplicate and enqueue post URLs
+        unique_posts = list(dict.fromkeys(post_matches))
+        for p_url in unique_posts:
+            q.put_nowait(("post", (update, p_url)))
+
+        # Deduplicate and enqueue direct links
+        all_items: List[Tuple[str, str]] = []
+        seen = set()
+
+        for code in gofile_matches:
+            u = f"https://gofile.io/d/{code}"
+            if u not in seen:
+                seen.add(u)
+                all_items.append(("gofile", u))
+
+        for u in hdhub_matches:
+            u = u.strip()
+            if u not in seen:
+                seen.add(u)
+                all_items.append(("hdhub", u))
+
+        if all_items:
+            was_truncated = False
+            if len(all_items) > MAX_LINKS_PER_BATCH:
+                all_items = all_items[:MAX_LINKS_PER_BATCH]
+                was_truncated = True
+            q.put_nowait(("links", (update, all_items, was_truncated)))
+
         if is_active:
-            # User already has a task running -> enqueue and notify
-            q.put_nowait((update, all_items, was_truncated))
             q_pos = q.qsize()
-            trunc_note = f" (limited to {MAX_LINKS_PER_BATCH} links)" if was_truncated else ""
             await update.message.reply_text(
                 f"⏳ <b>Added to your queue (Position #{q_pos})</b>\n"
-                f"Your previous request is currently processing. "
-                f"This batch of {len(all_items)} link(s){trunc_note} will start automatically next.",
+                f"Your previous request is currently processing and this request will start automatically next.",
                 parse_mode=ParseMode.HTML,
             )
         else:
-            # User is idle -> start processing immediately
             user_active_tasks.add(user_id)
-            q.put_nowait((update, all_items, was_truncated))
             asyncio.create_task(user_worker(user_id))
 
 

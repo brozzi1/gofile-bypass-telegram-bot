@@ -497,6 +497,42 @@ class HDHubResolver:
         with ThreadPoolExecutor(max_workers=workers) as executor:
             return list(executor.map(_worker, urls))
 
+    def resolve_post(
+        self,
+        post_url: str,
+        deep: bool = True,
+        max_workers: int = 5,
+        limit: Optional[int] = None,
+    ) -> Tuple[List[str], List[Tuple[str, Optional[Dict[str, Any]], Optional[Exception]]]]:
+        """Scrape all greenmotors links from a post page and resolve them concurrently."""
+        links = extract_links_from_post(post_url, session=self.session)
+        if limit and len(links) > limit:
+            links = links[:limit]
+        results = self.resolve_all(links, deep=deep, max_workers=max_workers)
+        return links, results
+
+
+def extract_links_from_post(post_url: str, session: Optional[requests.Session] = None) -> List[str]:
+    """Scrape and deduplicate all greenmotors sharing links from a 4kHDHub / HDHub4u post page."""
+    s = session or requests.Session()
+    headers = {
+        "User-Agent": DEFAULT_USER_AGENT,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    }
+    resp = s.get(post_url, headers=headers, timeout=12)
+    resp.raise_for_status()
+
+    # Search for all hrefs containing greenmotors.
+    matches = re.findall(r'href=["\']([^"\']*greenmotors\.[^"\']*)["\']', resp.text, re.IGNORECASE)
+    unique_links: List[str] = []
+    seen = set()
+    for m in matches:
+        m = m.strip()
+        if m and m not in seen:
+            seen.add(m)
+            unique_links.append(m)
+    return unique_links
+
 
 def resolve_hdhub(url: str, deep: bool = True) -> Dict[str, Any]:
     """Helper function to quickly resolve an HDHub link."""
