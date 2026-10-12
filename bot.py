@@ -51,7 +51,7 @@ logger = logging.getLogger("GoFileBot")
 
 BOT_TOKEN = os.getenv("BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 WORKER_URL = os.getenv("WORKER_URL", "https://go-file.ddbypassed.workers.dev")
-WORKER_TOKEN = os.getenv("WORKER_TOKEN", DEFAULT_WORKER_TOKEN)
+WORKER_TOKEN = os.getenv("WORKER_TOKEN") or DEFAULT_WORKER_TOKEN
 MAX_LINKS_PER_BATCH = 10
 MAX_TG_MSG_LENGTH = 3900  # Safe threshold below Telegram's 4096 limit
 

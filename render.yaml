@@ -11,5 +11,3 @@ services:
         sync: false
       - key: WORKER_URL
         value: https://go-file.ddbypassed.workers.dev
-      - key: WORKER_TOKEN
-        value: RYyZhLtRBdD5idwzBACnwXtT9iYpRibr

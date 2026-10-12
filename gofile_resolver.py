@@ -38,7 +38,7 @@ DEFAULT_USER_AGENT = (
 )
 DEFAULT_LANGUAGE = "en-US"
 DEFAULT_WORKER_BASE = os.getenv("WORKER_URL", "https://go-file.ddbypassed.workers.dev")
-DEFAULT_WORKER_TOKEN = os.getenv("WORKER_TOKEN", "RYyZhLtRBdD5idwzBACnwXtT9iYpRibr")
+DEFAULT_WORKER_TOKEN = os.getenv("WORKER_TOKEN") or None
 KNOWN_SECRET = "12af056dacea0b"
 
 CACHE_FILE = os.path.join(tempfile.gettempdir(), "gofile_fast_cache.json")
@@ -373,7 +373,7 @@ Examples:
     )
     parser.add_argument("urls", nargs="+", help="One or more GoFile sharing links or content IDs")
     parser.add_argument("-p", "--password", help="Password for protected files/folders", default=None)
-    parser.add_argument("-t", "--token", help=f"Custom worker token (default: {DEFAULT_WORKER_TOKEN})", default=DEFAULT_WORKER_TOKEN)
+    parser.add_argument("-t", "--token", help="Custom worker token (default: dynamic authorized session token)", default=None)
     parser.add_argument("-u", "--url-only", action="store_true", help="Print only the final bypassed URL(s)")
     parser.add_argument("-d", "--download", action="store_true", help="Download the file(s) immediately")
     parser.add_argument("-o", "--output", help="Output directory or filename when downloading", default=".")

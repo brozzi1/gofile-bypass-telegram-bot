@@ -46,7 +46,7 @@ Click the button below to deploy this bot to Render for free:
 3. **Set Environment Variables on Pella.app**:
    - `BOT_TOKEN`: `your_bot_token_from_botfather`
    - `WORKER_URL`: `https://your-worker-subdomain.workers.dev`
-   - *(Optional)* `WORKER_TOKEN`: `your_worker_token` (default: `RYyZhLtRBdD5idwzBACnwXtT9iYpRibr`)
+   - *(Optional)* `WORKER_TOKEN`: `your_worker_token` (leave unset to automatically use dynamic session tokens)
 
 4. **Start the Bot**:
    - Pella will detect `Procfile` or `Dockerfile`, install dependencies, and start `bot.py`.
