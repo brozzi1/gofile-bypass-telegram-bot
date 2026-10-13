@@ -24,6 +24,7 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from telegram import Update
 from telegram.constants import ParseMode
+from telegram.error import RetryAfter
 from telegram.ext import (
     Application,
     ApplicationBuilder,
@@ -55,7 +56,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 WORKER_URL = os.getenv("WORKER_URL", "https://go-file.ddbypassed.workers.dev")
 WORKER_TOKEN = os.getenv("WORKER_TOKEN") or DEFAULT_WORKER_TOKEN
 MAX_LINKS_PER_BATCH = 10
-MAX_POST_LINKS = int(os.getenv("MAX_POST_LINKS", "25"))
+MAX_POST_LINKS = int(os.getenv("MAX_POST_LINKS", "0"))  # 0 = unlimited (process all links in post)
 POST_BATCH_SIZE = 5
 MAX_TG_MSG_LENGTH = 3900  # Safe threshold below Telegram's 4096 limit
 
@@ -326,8 +327,8 @@ async def process_post(update: Update, post_url: str) -> None:
             pass
         return
 
-    # Enforce safe upper cap to avoid Telegram flood limits
-    items_to_process = items[:MAX_POST_LINKS]
+    # Process all links unless MAX_POST_LINKS is explicitly configured (> 0)
+    items_to_process = items[:MAX_POST_LINKS] if MAX_POST_LINKS > 0 else items
     total_processing = len(items_to_process)
 
     try:
@@ -381,22 +382,29 @@ async def process_post(update: Update, post_url: str) -> None:
         if len(msg_content) > MAX_TG_MSG_LENGTH:
             msg_content = msg_content[:MAX_TG_MSG_LENGTH]
 
-        try:
-            if chunk_idx == 1:
-                await status_msg.edit_text(
-                    msg_content,
-                    parse_mode=ParseMode.HTML,
-                    disable_web_page_preview=True,
-                )
-            else:
-                await update.message.reply_text(
-                    msg_content,
-                    parse_mode=ParseMode.HTML,
-                    disable_web_page_preview=True,
-                )
-                await asyncio.sleep(0.5)
-        except Exception as e:
-            logger.error(f"Error sending batch {chunk_idx}: {e}")
+        for attempt in range(3):
+            try:
+                if chunk_idx == 1:
+                    await status_msg.edit_text(
+                        msg_content,
+                        parse_mode=ParseMode.HTML,
+                        disable_web_page_preview=True,
+                    )
+                else:
+                    await update.message.reply_text(
+                        msg_content,
+                        parse_mode=ParseMode.HTML,
+                        disable_web_page_preview=True,
+                    )
+                    await asyncio.sleep(0.5)
+                break
+            except RetryAfter as e:
+                wait_time = float(getattr(e, "retry_after", 5)) + 1.0
+                logger.warning(f"Telegram RetryAfter on batch {chunk_idx}: sleeping {wait_time}s")
+                await asyncio.sleep(wait_time)
+            except Exception as e:
+                logger.error(f"Error sending batch {chunk_idx}: {e}")
+                break
 
 
 async def user_worker(user_id: int) -> None:
